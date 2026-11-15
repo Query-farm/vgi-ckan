@@ -1,0 +1,113 @@
+# name: test/sql/attach.test
+# description: The PORTAL ATTACH option, scoped API-token secrets and token isolation between portals
+# group: [ckan]
+
+require vgi
+
+require-env CKAN_WORKER
+
+require-env CKAN_MOCK
+
+# ------------------------------------------------------------ PORTAL option
+
+statement ok
+ATTACH 'ckan' AS ie (TYPE vgi, LOCATION '{CKAN_WORKER}', PORTAL '{CKAN_MOCK}/ireland');
+
+# Every function has an overload without the portal argument that uses the ATTACH option.
+query TT
+SELECT ckan_version, portal = '{CKAN_MOCK}/ireland' FROM ie.main.portal_info();
+----
+2.9.16	true
+
+query TI
+SELECT name, dataset_count FROM ie.main.groups() ORDER BY name;
+----
+haleandhearty	430
+
+query TT
+SELECT name, organization FROM ie.main.dataset('courts-service-purchase-orders-greater-than-20-000-2026');
+----
+courts-service-purchase-orders-greater-than-20-000-2026	the-courts-service
+
+query I
+SELECT count(*) FROM ie.main.datastore('dfb0930a-98a5-45a0-a6b7-e4beb66340e5', page_size := 50) WHERE paid_yes_no = 'Y';
+----
+116
+
+# An explicit portal still wins over the ATTACH option.
+query T
+SELECT ckan_version FROM ie.main.portal_info('{CKAN_MOCK}/canada');
+----
+2.10.8
+
+# tag := narrows to one tag (CKAN 2.11).
+query T
+SELECT name FROM ie.main.datasets('{CKAN_MOCK}/demo', tag := 'parking') ORDER BY name;
+----
+my-org--pcns
+
+statement ok
+DETACH ie;
+
+statement ok
+ATTACH 'ckan' (TYPE vgi, LOCATION '{CKAN_WORKER}');
+
+# ------------------------------------------------------- private portal + token
+
+# Without a token the private portal answers 403: the error says how to add one.
+statement error
+SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/private');
+----
+<REGEX>:.*Authorization Error.*CREATE SECRET \(TYPE ckan.*
+
+# An unscoped ckan secret is ignored, so it can never leak to another portal.
+statement ok
+CREATE SECRET ckan_any (TYPE ckan, API_TOKEN 'test-token-1234');
+
+statement error
+SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/private');
+----
+<REGEX>:.*Authorization Error.*
+
+statement ok
+DROP SECRET ckan_any;
+
+statement ok
+CREATE SECRET ckan_private (TYPE ckan, API_TOKEN 'test-token-1234', SCOPE '{CKAN_MOCK}/private');
+
+# The token is redacted in duckdb_secrets().
+query T
+SELECT secret_string LIKE '%test-token-1234%' FROM duckdb_secrets() WHERE name = 'ckan_private';
+----
+false
+
+query T
+SELECT site_title FROM ckan.main.portal_info('{CKAN_MOCK}/private');
+----
+Private CKAN (fixture)
+
+# With a token, private datasets are included (include_private=true).
+query TT
+SELECT name, private FROM ckan.main.datasets('{CKAN_MOCK}/private') ORDER BY name;
+----
+internal-budget	true
+public-roads	false
+
+query TR
+SELECT department, amount FROM ckan.main.datastore('{CKAN_MOCK}/private', 'b0d6e0a2-0000-4000-8000-000000000001') ORDER BY department;
+----
+finance	1250.5
+roads	980.0
+
+# The scoped secret is not sent to other portals: the public fixtures reject any
+# request carrying an Authorization header with HTTP 400.
+query T
+SELECT ckan_version FROM ckan.main.portal_info('{CKAN_MOCK}/demo');
+----
+2.11.5
+
+# A scope that merely shares a string prefix (…/private-other) does not match.
+statement error
+SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/private-other');
+----
+<REGEX>:.*not a CKAN Action API endpoint.*

@@ -1,0 +1,1 @@
+"""VGI ckan worker package."""

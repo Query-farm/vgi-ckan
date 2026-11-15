@@ -1,0 +1,139 @@
+{
+ "prefix": "/private",
+ "upstream": null,
+ "token": "test-token-1234",
+ "note": "Hand-written (not recorded): a token-protected CKAN 2.11 portal with one private dataset and a private DataStore table, shaped like demo.ckan.org's responses. Every request must carry 'Authorization: test-token-1234'.",
+ "interactions": {
+  "/api/3/action/datastore_search?fields=department%2Camount&limit=1000&offset=0&resource_id=b0d6e0a2-0000-4000-8000-000000000001&sort=_id%20asc": {
+   "status": 200,
+   "body": {
+    "help": "",
+    "success": true,
+    "result": {
+     "include_total": true,
+     "limit": 1000,
+     "records_format": "objects",
+     "resource_id": "b0d6e0a2-0000-4000-8000-000000000001",
+     "records": [
+      {
+       "department": "roads",
+       "amount": "980.00"
+      },
+      {
+       "department": "finance",
+       "amount": 1250.5
+      }
+     ],
+     "fields": [
+      {
+       "id": "department",
+       "type": "text"
+      },
+      {
+       "id": "amount",
+       "type": "numeric"
+      }
+     ],
+     "total": 2,
+     "total_was_estimated": false
+    }
+   }
+  },
+  "/api/3/action/datastore_search?limit=0&resource_id=b0d6e0a2-0000-4000-8000-000000000001": {
+   "status": 200,
+   "body": {
+    "help": "",
+    "success": true,
+    "result": {
+     "include_total": true,
+     "limit": 0,
+     "records_format": "objects",
+     "resource_id": "b0d6e0a2-0000-4000-8000-000000000001",
+     "records": [],
+     "fields": [
+      {
+       "id": "_id",
+       "type": "int"
+      },
+      {
+       "id": "department",
+       "type": "text"
+      },
+      {
+       "id": "amount",
+       "type": "numeric"
+      },
+      {
+       "id": "approved_on",
+       "type": "date"
+      }
+     ],
+     "total": 2,
+     "total_was_estimated": false
+    }
+   }
+  },
+  "/api/3/action/package_search?fl=capacity%2Cid%2Cname&include_private=true&rows=100&sort=id%20asc&start=0": {
+   "status": 200,
+   "body": {
+    "help": "",
+    "success": true,
+    "result": {
+     "count": 2,
+     "facets": {},
+     "search_facets": {},
+     "sort": "id asc",
+     "results": [
+      {
+       "id": "0a1b2c3d-0000-4000-8000-000000000001",
+       "name": "internal-budget",
+       "capacity": "private",
+       "metadata_modified": "2026-11-01T10:00:00.000Z"
+      },
+      {
+       "id": "0a1b2c3d-0000-4000-8000-000000000002",
+       "name": "public-roads",
+       "capacity": "public",
+       "metadata_modified": "2026-10-01T10:00:00.000Z"
+      }
+     ]
+    }
+   }
+  },
+  "/api/3/action/resource_show?id=b0d6e0a2-0000-4000-8000-000000000001": {
+   "status": 200,
+   "body": {
+    "help": "",
+    "success": true,
+    "result": {
+     "id": "b0d6e0a2-0000-4000-8000-000000000001",
+     "package_id": "0a1b2c3d-0000-4000-8000-000000000001",
+     "name": "Budget lines",
+     "format": "CSV",
+     "datastore_active": true,
+     "url": "https://private.example.org/dataset/internal-budget/resource/b0d6e0a2/download/budget.csv"
+    }
+   }
+  },
+  "/api/3/action/status_show": {
+   "status": 200,
+   "body": {
+    "help": "",
+    "success": true,
+    "result": {
+     "site_title": "Private CKAN (fixture)",
+     "site_description": "",
+     "site_url": "https://private.example.org",
+     "ckan_version": "2.11.5",
+     "error_emails_to": "",
+     "locale_default": "en",
+     "extensions": [
+      "datastore",
+      "datapusher",
+      "activity"
+     ]
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,235 @@
+# name: test/sql/ckan.test
+# description: Catalog and directory functions through DuckDB, against the recorded CKAN 2.9 / 2.10 / 2.11 portals in test/mock_api (ci/run-integration.sh)
+# group: [ckan]
+
+require vgi
+
+require-env CKAN_WORKER
+
+require-env CKAN_MOCK
+
+statement ok
+LOAD json;
+
+statement ok
+ATTACH 'ckan' (TYPE vgi, LOCATION '{CKAN_WORKER}');
+
+# ------------------------------------------------------------------- status
+
+# CKAN 2.11 (demo.ckan.org)
+query TTTT
+SELECT site_title, ckan_version, datastore_enabled, portal = '{CKAN_MOCK}/demo' FROM ckan.main.portal_info('{CKAN_MOCK}/demo');
+----
+CKAN Demo	2.11.5	true	true
+
+# CKAN 2.10 (open.canada.ca/data: the API lives under a path), 2.9 (data.gov.ie), and a portal that hides its version.
+query TTT
+SELECT replace(portal, '{CKAN_MOCK}', ''), ckan_version, list_contains(extensions, 'dcat') FROM (
+  SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/canada') UNION ALL
+  SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/ireland') UNION ALL
+  SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/qld')) ORDER BY 1;
+----
+/canada	2.10.8	true
+/ireland	2.9.16	true
+/qld	NULL	true
+
+# A pasted dataset-page URL is trimmed to the portal root.
+query T
+SELECT ckan_version FROM ckan.main.portal_info('{CKAN_MOCK}/canada/en/dataset/ee9bd7e8-90a5-45db-9287-85c8cf3589b6');
+----
+2.10.8
+
+# --------------------------------------------------------------------- datasets
+
+query I
+SELECT count(*) FROM ckan.main.datasets('{CKAN_MOCK}/demo');
+----
+13
+
+# Full dictionaries (organization_title / num_resources / license_title are not in the search index).
+query TTTITT
+SELECT name, title, organization_title, num_resources, license_title, tags
+FROM ckan.main.datasets('{CKAN_MOCK}/demo') WHERE organization = 'demo-organization' ORDER BY name;
+----
+my-org--pcns	Parking Penalty Charge Notices (PCNs)	DEMO ORGANIZATION	18	Open Government Licence 2.0 (United Kingdom)	[cpe, fine, highways, parking, transparency, transport]
+my-sample-dataset-001	My Sample Dataset 001	DEMO ORGANIZATION	1	cc-by	[climate, temperature]
+
+# Indexed columns only: served from `fl`. formats are distinct and sorted in both modes.
+query TTTT
+SELECT name, formats, epoch_ms(modified), url = '{CKAN_MOCK}/demo/dataset/' || name
+FROM ckan.main.datasets('{CKAN_MOCK}/demo') ORDER BY name LIMIT 4;
+----
+annakarenina	[JPEG, JSON, plain text]	1757752483781	true
+child-gg	[CSV]	1760048638872	true
+demo-dataset-rust-123456789	[CSV, JPEG]	1757743327078	true
+demo-dataset-rust-1234567890	[CSV, JPEG]	1757754762075	true
+
+# The same rows in full mode agree with fl mode.
+query I
+SELECT count(*) FROM (
+  SELECT name, formats, modified FROM ckan.main.datasets('{CKAN_MOCK}/demo')
+  EXCEPT
+  SELECT name, formats, modified FROM ckan.main.datasets('{CKAN_MOCK}/demo') WHERE raw IS NOT NULL
+);
+----
+0
+
+# Top-N: ORDER BY modified DESC LIMIT 3 becomes sort=metadata_modified desc and stops early (CKAN 2.9).
+query TT
+SELECT name, epoch_ms(modified) FROM ckan.main.datasets('{CKAN_MOCK}/ireland') ORDER BY modified DESC LIMIT 3;
+----
+eda24-real-current-public-expenditure-on-education	1794705695537
+eda70-pupils-enrolled-in-second-level-schools	1794705695268
+eda42-primary-pupils	1794705694964
+
+# Pushdown: organization IN, modified range and free text all reach Solr (CKAN 2.9).
+query TT
+SELECT name, organization FROM ckan.main.datasets('{CKAN_MOCK}/ireland', q := 'purchase orders')
+WHERE organization IN ('the-courts-service', 'national-council-for-special-education') AND modified >= TIMESTAMPTZ '2026-01-01 00:00:00+00'
+ORDER BY name;
+----
+courts-service-purchase-orders-greater-than-20-000-2026	the-courts-service
+ncse-pos-for-20-000-euro-or-over-in-2022	national-council-for-special-education
+pos-for-20-000-or-over-2021	national-council-for-special-education
+
+# res_format := shortcut, license pushdown and several small pages (CKAN 2.10).
+query II
+SELECT count(*), count(DISTINCT dataset_id)
+FROM ckan.main.datasets('{CKAN_MOCK}/canada', q := 'briefing note titles', res_format := 'CSV', page_size := 5)
+WHERE license_id = 'ca-ogl-lgo';
+----
+18	18
+
+# Multilingual portals: title falls back to title_translated, portal-specific fields stay in raw (JSON).
+query TT
+SELECT title, raw->>'$.title_translated.fr' IS NOT NULL FROM ckan.main.dataset('{CKAN_MOCK}/canada', 'ee9bd7e8-90a5-45db-9287-85c8cf3589b6');
+----
+Proactive Disclosure - Briefing Note Titles and Numbers	true
+
+# --------------------------------------------------------------------- dataset
+
+query TTTI
+SELECT name, organization, license_id, num_resources
+FROM ckan.main.dataset('{CKAN_MOCK}/ireland', 'courts-service-purchase-orders-greater-than-20-000-2026');
+----
+courts-service-purchase-orders-greater-than-20-000-2026	the-courts-service	CC-BY-4.0	3
+
+# Unknown id: no rows, not an error.
+query I
+SELECT count(*) FROM ckan.main.dataset('{CKAN_MOCK}/demo', 'no-such-dataset-xyz');
+----
+0
+
+# ------------------------------------------------------------------- resources
+
+query TI
+SELECT format, count(*) AS n FROM ckan.main.resources('{CKAN_MOCK}/demo') GROUP BY format ORDER BY n DESC, format;
+----
+CSV	20
+HTML	8
+JPEG	4
+JSON	1
+MP4	1
+plain text	1
+
+# format = 'CSV' narrows the search (res_format); this portal records no numeric sizes.
+query TTTT
+SELECT dataset_name, title, datastore_active, size
+FROM ckan.main.resources('{CKAN_MOCK}/ireland', q := 'courts service purchase orders 2026')
+WHERE format = 'CSV' AND dataset_name = 'courts-service-purchase-orders-greater-than-20-000-2026' ORDER BY position;
+----
+courts-service-purchase-orders-greater-than-20-000-2026	Purchase Orders Greater Than €20,000 2026 Q1	true	NULL
+courts-service-purchase-orders-greater-than-20-000-2026	Purchase Orders Greater Than €20,000 2026 Q2	true	NULL
+courts-service-purchase-orders-greater-than-20-000-2026	Purchase Orders for 20 thousand euro or over in 2026 Q3, CSV	true	NULL
+
+# ----------------------------------------------------------- directory functions
+
+query TTI
+SELECT name, title, dataset_count FROM ckan.main.organizations('{CKAN_MOCK}/demo') ORDER BY name;
+----
+demo-organization	DEMO ORGANIZATION	2
+forum	Forum	0
+qwqw	qwqw	0
+
+# CKAN caps all_fields listings at 25: this pages several times (CKAN 2.9).
+query II
+SELECT count(*) > 25, count(DISTINCT organization_id) = count(*) FROM ckan.main.organizations('{CKAN_MOCK}/ireland');
+----
+true	true
+
+query TI
+SELECT name, dataset_count FROM ckan.main.groups('{CKAN_MOCK}/ireland') ORDER BY name;
+----
+haleandhearty	430
+
+query TI
+SELECT tag, dataset_count FROM ckan.main.tags('{CKAN_MOCK}/demo') ORDER BY dataset_count DESC, tag LIMIT 5;
+----
+Flexible ァ	2
+russian	2
+climate	1
+cpe	1
+fine	1
+
+query TTI
+SELECT field, value, dataset_count FROM ckan.main.facets('{CKAN_MOCK}/ireland', 'res_format', max_values := 5) ORDER BY dataset_count DESC;
+----
+res_format	CSV	20526
+res_format	XLSX	14486
+res_format	JSON-STAT	14040
+res_format	PX	14040
+res_format	HTML	3047
+
+# CKAN 2.11 sends license booleans as 'True'/'False' strings; 2.10 as JSON booleans. Both normalise.
+query TTTT
+SELECT l.license_id, l.od_conformance, l.is_generic, l.domain_data
+FROM ckan.main.licenses('{CKAN_MOCK}/demo') l WHERE license_id IN ('notspecified', 'odc-by') ORDER BY 1;
+----
+notspecified	not reviewed	true	false
+odc-by	approved	false	true
+
+query TTT
+SELECT license_id, is_generic, domain_data FROM ckan.main.licenses('{CKAN_MOCK}/canada') ORDER BY 1 LIMIT 2;
+----
+ab-ogla	NULL	true
+ab-qptu	NULL	true
+
+# Activity stream (CKAN 2.9: snapshot has only the title; 2.10: the whole package).
+query TTT
+SELECT activity_type, title IS NOT NULL, dataset_name IS NULL FROM ckan.main.recent_changes('{CKAN_MOCK}/ireland', page_size := 5) LIMIT 3;
+----
+changed package	true	true
+changed package	true	true
+changed package	true	true
+
+query TT
+SELECT activity_type, dataset_name IS NOT NULL FROM ckan.main.recent_changes('{CKAN_MOCK}/canada', page_size := 3) LIMIT 2;
+----
+changed package	true
+changed package	true
+
+# A lower bound on changed_at stops paging: only the first page (offset 0) is requested;
+# a request for offset 20 would hit an unrecorded URL and fail.
+query I
+SELECT count(*) FROM ckan.main.recent_changes('{CKAN_MOCK}/ireland', page_size := 5)
+WHERE changed_at >= TIMESTAMPTZ '2026-11-15 01:21:35.069147+00';
+----
+3
+
+# CKAN 2.11 without the activity plugin: a clear error.
+statement error
+SELECT count(*) FROM ckan.main.recent_changes('{CKAN_MOCK}/demo');
+----
+<REGEX>:.*no activity stream.*
+
+# ---------------------------------------------------------------------- errors
+
+statement error
+SELECT * FROM ckan.main.portal_info('{CKAN_MOCK}/not-a-portal');
+----
+<REGEX>:.*not a CKAN Action API endpoint.*
+
+statement error
+SELECT * FROM ckan.main.datasets();
+----
+<REGEX>:.*no CKAN portal given.*

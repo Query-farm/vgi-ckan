@@ -1,0 +1,22 @@
+# name: test/sql/live.test
+# description: Optional live smoke test against the public CKAN demo portal. Skipped unless CKAN_LIVE is set (needs network).
+# group: [ckan]
+
+require vgi
+
+require-env CKAN_WORKER
+
+require-env CKAN_LIVE
+
+statement ok
+ATTACH 'ckan' (TYPE vgi, LOCATION '{CKAN_WORKER}');
+
+query T
+SELECT ckan_version LIKE '2.%' FROM ckan.main.portal_info('https://demo.ckan.org');
+----
+true
+
+query T
+SELECT count(*) > 0 FROM (SELECT name FROM ckan.main.datasets('https://demo.ckan.org') LIMIT 5);
+----
+true

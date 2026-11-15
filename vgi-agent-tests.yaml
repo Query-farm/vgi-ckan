@@ -1,16 +1,51 @@
 # Private graders for the public vgi.agent_test_tasks in the worker's catalog metadata.
 # `vgi-lint lint --ai` runs an agent on each prompt and grades it with check_sql.
 # See https://github.com/Query-farm/vgi-lint-check (VGI920).
+#
+# These tasks read live public CKAN portals (no credentials), so graders recompute the
+# answer at grading time with check_sql rather than comparing against a frozen value.
 tasks:
-  - name: formal_greeting
-    reference_sql: SELECT starter.main.greet('Grace', 'formal') AS greeting
-  - name: sum_of_squares
-    reference_sql: SELECT sum(squared) AS total FROM starter.main.sequence_table(10)
-  - name: stepped_sequence
-    reference_sql: SELECT n FROM starter.main.sequence_table(4, step := 5) ORDER BY n
-  # Reads the public demo API (https://vgi-starter-api.query-farm.services/v1).
-  - name: items_per_category
+  - name: demo_formats
     check_sql: >-
-      SELECT count(*) = 3 AND sum(items) = 25
-      FROM (SELECT category, count(*) AS items
-            FROM starter.main.fetch_items('https://vgi-starter-api.query-farm.services/v1') GROUP BY category)
+      SELECT count(*) > 0 AND bool_and(n > 0)
+      FROM (SELECT format, count(*) AS n FROM ckan.main.resources('https://demo.ckan.org') GROUP BY format)
+  - name: demo_ckan_version
+    check_sql: >-
+      SELECT ckan_version LIKE '2.%' FROM ckan.main.portal_info('https://demo.ckan.org')
+  - name: ireland_paid_orders
+    check_sql: >-
+      SELECT sum("Amount") > 0
+      FROM ckan.main.datastore('https://data.gov.ie', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5')
+      WHERE paid_yes_no = 'Y'
+  - name: ireland_dataset_license
+    check_sql: >-
+      SELECT license_id = 'CC-BY-4.0' AND num_resources > 0
+      FROM ckan.main.dataset('https://data.gov.ie', 'courts-service-purchase-orders-greater-than-20-000-2026')
+  - name: demo_organizations
+    check_sql: >-
+      SELECT count(*) > 0 FROM ckan.main.organizations('https://demo.ckan.org') WHERE dataset_count >= 0
+  - name: ireland_top_formats
+    check_sql: >-
+      SELECT bool_or(value = 'CSV') FROM ckan.main.facets('https://data.gov.ie', 'res_format', max_values := 5)
+  - name: demo_top_tags
+    check_sql: >-
+      SELECT count(*) > 0 FROM ckan.main.tags('https://demo.ckan.org', max_values := 5)
+  - name: ireland_groups_and_licenses
+    check_sql: >-
+      SELECT (SELECT count(*) FROM ckan.main.groups('https://data.gov.ie')) > 0
+         AND (SELECT count(*) FROM ckan.main.licenses('https://demo.ckan.org') WHERE od_conformance = 'approved') > 0
+  - name: ireland_latest_changes
+    check_sql: >-
+      SELECT count(*) = 5 FROM (SELECT * FROM ckan.main.recent_changes('https://data.gov.ie', page_size := 5) LIMIT 5)
+  - name: qld_buoy_readings
+    check_sql: >-
+      SELECT count(*) = 3 FROM (SELECT * FROM ckan.main.datastore_sql('https://www.data.qld.gov.au',
+        'SELECT "Site", count(*) AS n FROM "2bbef99e-9974-49b9-a316-57402b00609c" GROUP BY 1 ORDER BY 2 DESC LIMIT 3'))
+  - name: demo_file_reader
+    check_sql: >-
+      SELECT url = 'https://example.com/data/temperature.csv' AND ckan.main.read_sql(format, url) = read_sql
+      FROM ckan.main.resource_data('https://demo.ckan.org', '73127990-4645-4de7-a5f0-f016d028d984')
+  - name: ireland_recent_courts_datasets
+    check_sql: >-
+      SELECT count(*) > 0 FROM ckan.main.datasets('https://data.gov.ie')
+      WHERE organization = 'the-courts-service' AND modified >= TIMESTAMPTZ '2026-01-01 00:00:00+00'

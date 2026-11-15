@@ -1,62 +1,33 @@
-<!-- managed-by: vgi-starters (edit upstream in shared/README.md.tmpl, then run tools/render.py) -->
 <p align="center">
   <img src="https://query.farm/media-kit/products/vgi/vgi-logo.png" alt="Vector Gateway Interface (VGI)" width="320">
 </p>
 
-<p align="center"><em>A Query.Farm VGI worker for DuckDB, written in Python.</em></p>
+# Query Any CKAN Open-Data Portal in DuckDB
 
-# VGI Starter Worker — Python
+> **vgi-ckan** · a [Query.Farm](https://query.farm) VGI worker
 
-[![CI](https://github.com/Query-farm/vgi-starter-python/actions/workflows/ci.yml/badge.svg)](https://github.com/Query-farm/vgi-starter-python/actions/workflows/ci.yml)
+[![CI](https://github.com/Query-farm/vgi-ckan/actions/workflows/ci.yml/badge.svg)](https://github.com/Query-farm/vgi-ckan/actions/workflows/ci.yml)
 [![vgi worker: query.farm](https://query.farm/media-kit/shields/vgi-worker.svg)](https://query.farm)
 
-[VGI](https://query.farm/vgi) lets DuckDB call functions that live in a separate
-process: your code, in any language, exposed as ordinary SQL. This worker adds
-three example functions that you rename and replace with your own:
+[CKAN](https://ckan.org) runs thousands of open-data portals: national ones such as
+data.gov.ie, open.canada.ca and data.qld.gov.au, and many city and agency sites. This worker
+reads any of them through the CKAN Action API v3 (CKAN 2.9, 2.10 and 2.11). You can search
+datasets and resources, list organizations, groups, tags, facets and licenses, follow recent
+changes, and read DataStore tables with typed columns. Most portals need no credentials.
 
-| Function | Kind | Shows you how to |
-|---|---|---|
-| `greet(name)` / `greet(name, style)` | scalar | vectorize over a column, overload, constrain a constant |
-| `sequence_table(count, step := 1)` | table | stream rows in batches, take named arguments |
-| `fetch_items(base_url, page_size := 100)` | table | page through a REST API, retry, read a secret |
-
-<!-- template-only:start -->
-## Use this template
-
-This repository is a **template**. Click **Use this template** on GitHub, or:
-
-```bash
-gh repo create my-org/weather-worker --template Query-farm/vgi-starter-python --private --clone
-cd weather-worker
-make init NAME=weather     # renames catalog, package, binary, env vars; removes this section
-make check                 # lint + tests over every transport + metadata score
+```sql
+-- Which data.gov.ie publishers updated purchase-order datasets this year?
+SELECT organization, count(*) AS datasets, max(modified) AS last_change
+FROM ckan.main.datasets('https://data.gov.ie', q := 'purchase orders')
+WHERE modified >= TIMESTAMPTZ '2026-01-01'
+GROUP BY organization ORDER BY datasets DESC;
 ```
 
-Prefer to work with an AI coding agent? `make init` first, then hand it
-[AGENTS.md](AGENTS.md). See [Using with coding agents](#using-with-coding-agents).
-
-Starters exist for [Python](https://github.com/Query-farm/vgi-starter-python),
-[TypeScript](https://github.com/Query-farm/vgi-starter-typescript),
-[Go](https://github.com/Query-farm/vgi-starter-go),
-[Rust](https://github.com/Query-farm/vgi-starter-rust),
-[Java](https://github.com/Query-farm/vgi-starter-java) and
-[C#](https://github.com/Query-farm/vgi-starter-csharp). They are generated from
-[Query-farm/vgi-starters](https://github.com/Query-farm/vgi-starters); send
-changes there.
-<!-- template-only:end -->
+The free-text search and the `modified` range are sent to the portal's Solr index. The query
+selects only indexed columns, so the worker requests just those fields (`fl`) instead of full
+dataset records.
 
 ## Quick start
-
-**Prerequisites:** Python 3.13+ and [uv](https://docs.astral.sh/uv/) (it runs the SQL
-test runner and the metadata checker).
-
-```bash
-make build
-```
-
-Then open DuckDB 2.0 or [Haybarn](https://query.farm/products/haybarn) and attach the
-worker. `LOCATION` is the command DuckDB runs to start it; use an absolute path,
-because a relative one resolves against DuckDB's working directory.
 
 **DuckDB 2.0:**
 
@@ -65,250 +36,218 @@ SET allow_extension_repositories = 'allowed';
 CREATE EXTENSION REPOSITORY IF NOT EXISTS query_farm WITH PREFIX 'https://duckdb-extensions.query.farm';
 INSTALL vgi FROM query_farm;
 LOAD vgi FROM query_farm;
-ATTACH 'starter' (TYPE vgi, LOCATION '/abs/path/to/vgi-starter-python/.venv/bin/vgi-starter-worker');
+
+ATTACH 'ckan' (TYPE vgi,
+  LOCATION 'uvx --from git+https://github.com/Query-farm/vgi-ckan@v0.1.0 vgi-ckan-worker');
+
+SELECT site_title, ckan_version FROM ckan.main.portal_info('https://demo.ckan.org');
 ```
 
-**Haybarn 2.0** (`uvx haybarn-cli`):
+**Haybarn 2.0** (`uvx haybarn-cli`): use `INSTALL vgi FROM community; LOAD vgi;` and the same
+`ATTACH`.
+
+**From a checkout:** run `make build`, then use
+`LOCATION '/abs/path/to/vgi-ckan/.venv/bin/vgi-ckan-worker'`.
+
+### One portal per catalog
+
+Every function takes the portal URL as its first argument. Each one also has an overload
+without that argument, which uses the `PORTAL` ATTACH option:
 
 ```sql
-INSTALL vgi FROM community;
-LOAD vgi;
-ATTACH 'starter' (TYPE vgi, LOCATION '/abs/path/to/vgi-starter-python/.venv/bin/vgi-starter-worker');
+ATTACH 'ckan' AS ie (TYPE vgi, LOCATION '...', PORTAL 'https://data.gov.ie');
+SELECT name, title FROM ie.main.datasets() WHERE organization = 'the-courts-service';
 ```
 
-Now call the functions:
+A pasted dataset page or `/api/3/...` URL is trimmed to the portal root. For example,
+`https://open.canada.ca/data/en/dataset/<id>` becomes `https://open.canada.ca/data`.
+
+## Functions
+
+All functions are in schema `ckan.main`. Timestamps are `TIMESTAMPTZ` in UTC.
+
+| Function | Returns | CKAN action |
+|---|---|---|
+| `datasets(portal, q :=, fq :=, tag :=, group_name :=, res_format :=, page_size := 100)` | One row per dataset | `package_search` |
+| `dataset(portal, id)` | One dataset by id or name (no rows if it does not exist) | `package_show` |
+| `resources(portal, q :=, fq :=, tag :=, group_name :=, res_format :=, page_size := 100)` | One row per resource of the matching datasets | `package_search` |
+| `organizations(portal)` / `groups(portal)` | Publishers / themes with dataset counts | `organization_list` / `group_list` |
+| `tags(portal, q :=, fq :=, max_values := 1000)` | Tags with dataset counts | `package_search` facet |
+| `facets(portal, field, q :=, fq :=, max_values := 1000)` | Dataset counts per value of any indexed field | `package_search` facet |
+| `licenses(portal)` | The portal's license register | `license_list` |
+| `portal_info(portal)` | Site title, CKAN version, plugins, DataStore availability | `status_show` |
+| `recent_changes(portal, page_size := 100)` | The dataset activity stream, newest first | `recently_changed_packages_activity_list` |
+| `datastore(portal, resource_id, filters :=, q :=, page_size := 1000)` | Rows of a DataStore table, typed | `datastore_search` |
+| `datastore_sql(portal, sql)` | Rows of a read-only PostgreSQL query, typed | `datastore_search_sql` |
+| `resource_data(portal, resource_id, page_size := 1000)` | DataStore rows, or the download URL and a reader query | `resource_show` + `datastore_search` |
+| `read_sql(resource_format, url)` (scalar) | The `read_csv` / `read_parquet` / `read_json_auto` query for a file | none |
+
+### Columns you can UNION across portals
+
+`datasets` and `resources` share their column names with the sibling open-data workers
+(Socrata, OpenDataSoft): `portal`, `dataset_id`, `resource_id`, `title`, `format`, `url`,
+`created` and `modified`. Results from several portals combine with `UNION ALL`:
 
 ```sql
-SELECT starter.main.greet('Ada');                         -- Hi, Ada!
-SELECT starter.main.greet('Ada', 'formal');               -- Good day, Ada.
-SELECT * FROM starter.main.sequence_table(5, step := 2) ORDER BY n;
+SELECT portal, name, title, modified FROM ckan.main.datasets('https://data.gov.ie', q := 'air quality')
+UNION ALL
+SELECT portal, name, title, modified FROM ckan.main.datasets('https://open.canada.ca/data', q := 'air quality');
 ```
 
-`fetch_items` pages through a REST API. Try it against the public demo API (25 fixed items):
+`datasets` also has `organization`, `organization_title`, `groups`, `tags`, `formats`
+(`VARCHAR[]`), `license_id`, `license_title`, `num_resources`, `private`, `state`, `type`,
+`author`, `maintainer`, `version`, `source_url`, `extras` (`MAP`) and `raw`. `raw` is a `JSON`
+column with the portal's full record, including portal-specific fields such as
+`title_translated`.
+
+### Reading the data
+
+A resource whose rows were loaded into the portal's **DataStore** (`datastore_active`) is
+read with `datastore()`. Its column types come from the DataStore field types: `int*` becomes
+`BIGINT`, `numeric`/`float*` `DOUBLE`, `timestamp` `TIMESTAMP`, `timestamptz` `TIMESTAMPTZ`,
+`date` `DATE`, `bool` `BOOLEAN`, `json` `JSON`, `_type` arrays `LIST`, and everything else
+`VARCHAR`. Many portals load CSVs as all-text columns, so cast those in SQL.
 
 ```sql
-SELECT category, count(*) AS items, round(avg(price), 2) AS avg_price
-FROM starter.main.fetch_items('https://vgi-starter-api.query-farm.services/v1')
-GROUP BY category ORDER BY category;
+SELECT "Supplier Name", sum("Amount") AS total
+FROM ckan.main.datastore('https://data.gov.ie', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5')
+WHERE paid_yes_no = 'Y' GROUP BY ALL ORDER BY total DESC LIMIT 5;
 ```
 
-If an older cached extension misbehaves, refresh it with `FORCE INSTALL vgi FROM query_farm;`
-(DuckDB) or `FORCE INSTALL vgi FROM community;` (Haybarn).
-
-## Using it in a pipeline
-
-Worker functions compose with everything else in DuckDB:
+Other resources are plain files. The worker does not parse files: DuckDB's readers do that.
+`resource_data()` returns the URL together with a ready query:
 
 ```sql
--- Materialize an API into a local table.
-CREATE TABLE items AS SELECT * FROM starter.main.fetch_items('https://vgi-starter-api.query-farm.services/v1');
-
--- Join it with local files.
-SELECT i.name, i.price, s.units
-FROM items i JOIN 'sales.parquet' s ON s.item_id = i.id;
-
--- Call a scalar per row of another table.
-SELECT customer, starter.main.greet(customer, 'formal') FROM read_csv('customers.csv');
+SELECT url, read_sql FROM ckan.main.resource_data('https://demo.ckan.org', '73127990-4645-4de7-a5f0-f016d028d984');
+-- read_sql: SELECT * FROM read_csv('https://example.com/data/temperature.csv')
+SELECT * FROM read_csv('https://example.com/data/temperature.csv');
 ```
 
-## Project layout
+`datastore_sql()` runs read-only SQL on the portal's PostgreSQL. This works only where the
+portal enables `ckan.datastore.sqlsearch.enabled` (data.qld.gov.au does; data.gov.ie,
+open.canada.ca and demo.ckan.org do not, and the function says so). Tables are resource ids
+in double quotes. If a result exceeds the portal's row cap (`ckan.datastore.search.rows_max`),
+the function raises an error instead of returning truncated rows.
 
-```
-src/starter_worker/
-  worker.py        # assembles the catalog; add new functions to FUNCTIONS
-  meta.py          # catalog/schema metadata + helpers (object_tags, column)
-  greet.py         # scalar example (overloads, ConstParam choices)
-  sequence.py      # table function example (named args, streaming state)
-  fetch_items.py   # REST API table function (pagination, retries, secrets)
-tests/             # pytest unit tests (in-process client)
-test/sql/          # sqllogictest files run through DuckDB
-test/mock_api/     # offline mock of the REST API used by tests
-examples/          # recipes: pushdown, caching, catalog tables, aggregates, COPY …
-ci/                # integration harness used by `make test-sql` and CI
-scripts/           # vgi_template.py (init / template-diff)
-vgi-agent-tests.yaml  # private graders for the agent test tasks
-```
+## What pushes down
 
-## Adding a function
+| Function | SQL | Sent to the portal as |
+|---|---|---|
+| `datasets` | `=`, `IN` on `organization`, `license_id`, `type`, `state`, `private`, `name`, `dataset_id` | Solr `fq` terms (`private` → `capacity`) |
+| `datasets` | ranges on `created`, `modified`, `num_resources` | Solr range queries on `metadata_created`, `metadata_modified`, `num_resources` (strict bounds widen to inclusive at millisecond precision) |
+| `datasets` | selecting only indexed columns (`name`, `title`, `organization`, `groups`, `tags`, `formats`, `license_id`, `state`, `type`, `private`, `created`, `modified`, `url`) | `fl`, which returns index fields instead of full records |
+| `datasets` | `ORDER BY modified / created / name / dataset_id … LIMIT n` | Solr `sort`, and paging stops once n matching rows are out |
+| `resources` | `=`, `IN` on `format`, `organization`, `dataset_id`, `dataset_name`; `ORDER BY dataset_id / dataset_name … LIMIT n` | `res_format` / `organization` / `id` / `name` in `fq`; `sort` |
+| `datastore` / `resource_data` | `=`, `IN` on any column; the selected columns | `filters` (a list value for `IN`); `fields` |
+| `datastore` | `ORDER BY <numeric / temporal column> … LIMIT n` | `sort` with an explicit `NULLS FIRST/LAST` that matches DuckDB, plus an early stop |
+| `recent_changes` | `changed_at >= …` | Paging stops at the first page older than the bound |
 
-1. Create `src/starter_worker/<name>.py`. Copy the closest example: `greet.py` for a
-   scalar, `sequence.py` for a generator, `fetch_items.py` for an API.
-2. Declare arguments with `Annotated[..., Param(...)]`/`ConstParam(...)` (scalars) or a
-   frozen dataclass of `Annotated[..., Arg(...)]` (table functions). Use `Arg(0, ...)`
-   for positional arguments and `Arg("name", default=...)` for named ones.
-3. Give the class a `class Meta` with `name`, `description`, `tags=object_tags(...)`
-   and `examples`.
-4. Add the class to `FUNCTIONS` in `src/starter_worker/worker.py`.
+Every predicate is also re-checked locally (`auto_apply_filters`), so a translation only
+narrows what the portal returns. Predicates the API cannot express (`LIKE`, `<>`, list
+predicates) are evaluated in DuckDB. For tags, groups and resource formats, use the
+`tag :=`, `group_name :=` and `res_format :=` arguments to filter on the portal.
 
-**Which kind of function?**
+Paging is `rows`/`start` (search) or `limit`/`offset` (DataStore) over a stable sort
+(`id asc` / `_id asc`). The cursor is externalized, so a scan can resume on any worker over
+HTTP. DuckDB can tighten dynamic filters during a scan, for example a top-N threshold or join
+keys. The filters sent with the first page are therefore kept for the rest of the scan, so
+later pages stay aligned with `start`/`offset`. Tighter filters apply locally. Requests that
+get 429, 502, 503 or 504 are retried with exponential backoff that honours `Retry-After`.
 
-| You want to… | Use |
-|---|---|
-| compute one value per input row | a **scalar** function |
-| return a set of rows from arguments (an API, a file, a generator) | a **table** function |
-| transform or aggregate the rows of a query | a **table in-out** function or an **aggregate** |
-| expose a fixed dataset by name (`SELECT * FROM starter.main.t`) | a **catalog table** |
-| write data out to a file or service | `COPY … TO` with a copy function |
-| accept `INSERT` / `UPDATE` / `DELETE` | a catalog table with insert/update/delete functions |
+## Private datasets (API tokens)
 
-The [examples/](examples/) folder has a recipe for most of these. Writable tables have no
-recipe:
-
-A writable table is a catalog `Table` that names a table in-out function per operation in
-`insert_function`, `update_function` and `delete_function`, with the richest result each one
-produces in `write_result_modes`. The helpers in `vgi.write_results` (`write_options`,
-`write_result_schema`, `write_result_batch`, `row_id_field`) read DuckDB's `write_options`
-argument and build the result. UPDATE and DELETE need a scan function that emits
-`row_id_field()` and declares projection pushdown. Transactions: override `attach_supports_transactions`
-and `catalog_transaction_begin` / `_commit` / `_rollback` on the catalog. Since VGI protocol 3.3
-a table's scan and write functions are table-only: hidden from `duckdb_functions()` and not
-callable from SQL. Set `expose_scan=True` on the table to keep the scan callable as an ordinary
-table function too (write functions never are). See
-[Writable tables](https://github.com/Query-farm/vgi-python/blob/main/docs/catalog-interface.md#writable-tables)
-in the vgi-python docs.
-
-## Secrets and configuration
-
-`fetch_items` shows the recommended pattern. A bearer token comes from a DuckDB secret
-when one exists, and from an environment variable otherwise:
+Public portals need nothing. For private datasets, create a CKAN API token (user settings →
+API tokens) and store it in a `ckan` secret **scoped to the portal URL**. Create the secret
+after `ATTACH`, which registers the secret type:
 
 ```sql
-CREATE SECRET (TYPE starter_api, TOKEN 'your-token');      -- per session, never logged
+CREATE SECRET my_portal (TYPE ckan, API_TOKEN '...', SCOPE 'https://data.example.org');
 ```
 
-```bash
-STARTER_API_TOKEN=your-token make run-http                # for servers and containers
-```
+The token is sent in the `Authorization` header only to URLs under that scope, and only at a
+path boundary: a scope of `https://data.example.org` does not match
+`https://data.example.org.evil.com`. A `ckan` secret without `SCOPE` is ignored, so a token can
+never reach another portal. With a token, `datasets()` and `resources()` add
+`include_private=true`. The token is redacted in `duckdb_secrets()` and is never stored in
+scan state.
 
-Try it: the demo API's `/v1/auth` endpoint needs the published token `demo-token`.
+## CKAN version differences handled
 
-```sql
-SELECT count(*) FROM starter.main.fetch_items('https://vgi-starter-api.query-farm.services/v1/auth');   -- fails: HTTP 401
-CREATE SECRET (TYPE starter_api, TOKEN 'demo-token');
-SELECT count(*) FROM starter.main.fetch_items('https://vgi-starter-api.query-farm.services/v1/auth');   -- 25
-```
+Observed while recording the fixtures:
 
-Never bake credentials into the image or the source. If a function can't run without
-real credentials, its examples can't execute in CI either. Set `execute: false` on the
-metadata check for that worker (see `.github/workflows/ci.yml`), and add
-`LINT_ARGS ?= --no-execute` to the Makefile so local runs match.
+- CKAN 2.11 returns `license_list` booleans as the strings `"True"`/`"False"`; 2.9 and 2.10
+  return JSON booleans. Both are normalised.
+- Unknown actions return HTTP 400 with a bare JSON string (`"Bad request - Action name not
+  known: …"`). This happens for `recently_changed_packages_activity_list` without the activity
+  plugin (CKAN 2.10+) and for `datastore_search_sql` where it is disabled. The worker raises a
+  clear error in both cases.
+- `datastore_search` on a resource without a DataStore table returns 404 on 2.9/2.10 and 500 on
+  2.11. Both become an error that points at `resource_data()` / `read_csv`.
+- Multilingual (scheming / fluent) portals put text in `title_translated` /
+  `notes_translated`. `title` and `description` fall back to the portal locale, then English.
+- The 2.9 activity stream has only the title in its snapshot, while 2.10 has the whole
+  dataset. `dataset_name` is NULL when the snapshot does not include it.
+- `size` can be a number or a human string such as `"523 KiB"` (data.qld.gov.au). Only
+  numbers are kept.
+- Search-index timestamps have millisecond precision and full records have microseconds.
+  `created`/`modified` are truncated to milliseconds, so both kinds of request return equal
+  values.
+- Some portals (data.qld.gov.au) do not report `ckan_version`, so it is NULL.
 
 ## Testing
 
 ```bash
-make test-unit                 # fast Python unit tests
-make test-sql                  # test/sql/*.test through DuckDB (stdio)
-make test-sql TRANSPORT=http   # …over HTTP (also: launch)
-make check                     # everything CI runs
+make check      # ruff, mypy, pydoclint, pytest, SQL tests over stdio/launch/http, vgi-lint
 ```
 
-`test/sql/*.test` files are [sqllogictest](https://duckdb.org/docs/stable/dev/sqllogictest/intro)
-scripts. `ci/run-integration.sh` runs them against your worker and fails on any
-unexpected skip, so a broken transport can't hide behind a green run.
-`fetch_items` is tested against `test/mock_api/server.py` so tests are fast and
-offline.
+Running CKAN locally needs Solr, PostgreSQL, Redis and CKAN, which is several GB. The SQL suite
+(`test/sql/*.test`, through the real `vgi` extension in Haybarn 2.0) instead runs against
+`test/mock_api/server.py`, a **strict replay** of responses recorded once from public portals:
 
-**Testing against real data:** put live tests in their own `.test` file that starts with
-`require-env STARTER_LIVE`. They run only when that variable is set. Add the skip reason
-to `EXPECTED_SKIP_REASONS` in CI.
+| Prefix | Recorded from | CKAN |
+|---|---|---|
+| `/demo` | https://demo.ckan.org | 2.11.5 |
+| `/canada` | https://open.canada.ca/data | 2.10.8 |
+| `/ireland` | https://data.gov.ie | 2.9.16 (with DataStore) |
+| `/qld` | https://www.data.qld.gov.au | not reported (`datastore_search_sql` enabled) |
+| `/private` | hand-written | a token-protected portal |
 
-## Metadata and the quality score
+The replay answers only the exact recorded request (method, path, sorted query string). Any
+other request gets HTTP 501, so a changed request fails the test instead of passing silently.
+The `/private` portal requires `Authorization: test-token-1234`. Every other prefix rejects a
+request that *carries* a token, so a token sent to the wrong portal fails the tests. The
+replay also answers the first request for every URL with 429 + `Retry-After: 0`, which
+exercises the retry path. `test/sql/live.test` is an optional smoke test against
+demo.ckan.org. It runs when `CKAN_LIVE=1` is set and is skipped otherwise.
 
-DuckDB, agents and documentation tools discover your functions through their metadata:
-titles, descriptions, argument docs, examples and keywords.
-[vgi-lint](https://github.com/Query-farm/vgi-lint-check) checks it, and CI runs it on
-every push. Its settings live in `vgi-lint.toml`, which `make lint-explain`,
-`vgi-lint lint`, and CI all read. This template scores 100/100 with no findings.
+To re-record (network; a few hundred KB):
 
 ```bash
-make lint-explain                              # findings, each with its fix
-make lint-explain LINT_ARGS="--format agent"   # the same, grouped for coding agents
-make lint-ai                                   # optional: an agent must solve vgi-agent-tests.yaml
+python3 test/mock_api/server.py --record     # prints PORT:<n>; forwards unrecorded requests and saves them
+# then run the SQL tests with CKAN_MOCK=http://127.0.0.1:<n>
 ```
 
-Each report also states an **assurance level**: how much was actually verified.
-
-| Level | Reached when | Here |
-|---|---|---|
-| L1 structural | the static metadata is clean | workers that need real credentials (`execute: false` in CI) |
-| L2 behavioural | the examples also run and return what they claim | **the CI gate** |
-| L3 semantic | an agent solves the worker's own test tasks, and the docs are reviewed | `make lint-ai`, before publishing |
-
-- **How strict.** Your copy fails on warnings (`fail_on = "warning"` in `vgi-lint.toml`).
-  Raise it to `"info"` before you publish the worker for others.
-- **The linter isn't pinned.** It tracks the current quality bar, so a new rule can flag
-  metadata that passed yesterday. Fix it, or waive the finding.
-- **Waivers.** If a finding is genuinely wrong for your worker, waive it in
-  `vgi-lint.toml` with a `kind` and a `reason`.
-- **Existing workers.** If you're adding this gate to a worker that already has
-  findings, record them with `vgi-lint lint --baseline vgi-lint-baseline --update-baseline`
-  and set `baseline` in `vgi-lint.toml`. After that, only new findings fail.
-
-Metadata lives in `src/starter_worker/meta.py` and each function's `class Meta`.
-
-## Logging and debugging
-
-stdout carries the Arrow protocol, so **never print to stdout**. Log to stderr instead.
-Use the standard `logging` module (the SDK routes it to stderr); `--debug` or `--log-level DEBUG` turns it up.
-
-- Under DuckDB (stdio/launch), worker stderr shows up in DuckDB's error messages and
-  terminal.
-- In Docker it goes to `docker logs`.
-- `make debug` runs one query against the worker with debug logging on.
+The metadata check (`make lint-explain`) scores 100/100 with zero findings at
+`fail_on = "info"`. The examples read public, keyless portals, so CI runs them live
+(`execute: true`).
 
 ## Deploying
 
-The same binary serves stdio (DuckDB starts it locally) or HTTP (you host it):
-
-```bash
-docker build -t weather-worker .
-docker run -p 8000:8000 -e STARTER_API_TOKEN=... weather-worker   # health: GET /health
-```
-
-```sql
-ATTACH 'starter' (TYPE vgi, LOCATION 'https://workers.example.com/starter');
-```
-
-Put hosted workers behind TLS and authentication. See
-[authentication](https://query.farm/vgi/authentication) for bearer tokens and JWTs, and
-[distributing a worker](https://query.farm/vgi/distributing-a-worker) for packaging.
-Pass secrets with `-e` or your platform's secret manager.
-
-## Releasing
-
-Push a tag like `v0.1.0`. The release workflow builds the wheel and sdist, attaches them to the GitHub release, and (if you set the repository variable `PYPI_PUBLISH=true` and configure PyPI Trusted Publishing) publishes to PyPI, so users can run `uvx vgi-starter-worker`. Without PyPI, users install straight from the repo with `uvx --from git+https://github.com/Query-farm/vgi-starter-python@v0.1.0 vgi-starter-worker`. Every artifact is signed with cosign and
-carries SLSA build provenance. `ci/check-version.sh` makes sure the tag matches the
-version in `pyproject.toml`.
-
-## Using with coding agents
-
-[AGENTS.md](AGENTS.md) is written for AI coding agents (Claude Code reads it via
-`CLAUDE.md`; Codex, Cursor and others read it directly). It covers the commands, the
-recipe for adding a function, the metadata checklist and the sharp edges. A good first
-prompt:
-
-> Read AGENTS.md. Replace `fetch_items` with `forecast(lat DOUBLE, lon DOUBLE)` that calls
-> the Open-Meteo API. Include full metadata, a mock-server test and a `STARTER_LIVE` test.
-> You're done when `make check` passes.
-
-## Keeping up with the template
-
-`make template-diff` shows what changed upstream (CI, docs, examples) since your copy was
-made. Your copy records its template version in `.vgi-starter.json`.
-
-## Learn more
-
-- [What is VGI?](https://query.farm/vgi) · [Getting started](https://query.farm/vgi/getting-started) · [Building a worker](https://query.farm/vgi/building-a-worker)
-- [Python SDK docs](https://query.farm/vgi/docs/python/): [scalar tutorial](https://query.farm/vgi/docs/python/tutorial/scalar/), [table tutorial](https://query.farm/vgi/docs/python/tutorial/table/)
-- [Distributing a worker](https://query.farm/vgi/distributing-a-worker) · [Choosing a language](https://query.farm/vgi/languages) · [llms.txt](https://query.farm/vgi/llms.txt)
-- SDK source: [vgi-python](https://github.com/Query-farm/vgi-python) · RPC layer: [https://vgi-rpc-python.query.farm](https://vgi-rpc-python.query.farm)
+The same entry point serves stdio (DuckDB starts it) or HTTP
+(`vgi-ckan-worker --http --port 8000`, or the Dockerfile). With HTTP, tokens still come from
+the caller's DuckDB secret.
 
 ## Support
 
-Open an issue on this repository. For VGI itself, see [query.farm](https://query.farm).
+Open an issue on [Query-farm/vgi-ckan](https://github.com/Query-farm/vgi-ckan/issues).
+For VGI itself, see [query.farm](https://query.farm).
 
-## Authorship & license
+## Authorship & License
 
-The starter template is written by [Query.Farm](https://query.farm) and released under
-the [BSD Zero Clause License](LICENSE) (0BSD). Use it for anything, with no attribution
-required. Replace this section with your own license once the code is yours.
+Written by [Query.Farm](https://query.farm). Released under the [BSD Zero Clause License](LICENSE) (0BSD).
+
+Copyright 2026 Query Farm LLC - https://query.farm
+
+CKAN is a project of the Open Knowledge Foundation. This project is not affiliated with or
+endorsed by it or by any portal operator. Data read through this worker remains subject to each
+portal's own terms and licenses (see `licenses()` and each dataset's `license_id`).

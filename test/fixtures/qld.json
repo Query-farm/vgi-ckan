@@ -1,0 +1,298 @@
+{
+ "prefix": "/qld",
+ "upstream": "https://www.data.qld.gov.au",
+ "ckan_version": "not reported by status_show",
+ "note": "Recorded from the public, keyless CKAN Action API by test/mock_api/server.py --record; tiny volumes.",
+ "interactions": {
+  "/api/3/action/datastore_search_sql?sql=SELECT%20%22Site%22%2C%20%22DateTime%22%3A%3Atimestamp%20AS%20ts%2C%20%22Hs%22%3A%3Anumeric%20AS%20hs%20FROM%20%222bbef99e-9974-49b9-a316-57402b00609c%22%20WHERE%20%22Site%22%20%3D%20%27Caloundra%27%20ORDER%20BY%20ts%20LIMIT%203": {
+   "status": 200,
+   "body": {
+    "help": "https://www.data.qld.gov.au/api/3/action/help_show?name=datastore_search_sql",
+    "success": true,
+    "result": {
+     "sql": "SELECT \"Site\", \"DateTime\"::timestamp AS ts, \"Hs\"::numeric AS hs FROM \"2bbef99e-9974-49b9-a316-57402b00609c\" WHERE \"Site\" = 'Caloundra' ORDER BY ts LIMIT 3",
+     "records": [
+      {
+       "Site": "Caloundra",
+       "ts": "2026-11-08T00:00:00",
+       "hs": 0.821
+      },
+      {
+       "Site": "Caloundra",
+       "ts": "2026-11-08T00:30:00",
+       "hs": 0.869
+      },
+      {
+       "Site": "Caloundra",
+       "ts": "2026-11-08T01:00:00",
+       "hs": 0.818
+      }
+     ],
+     "fields": [
+      {
+       "id": "Site",
+       "type": "text"
+      },
+      {
+       "id": "ts",
+       "type": "timestamp"
+      },
+      {
+       "id": "hs",
+       "type": "numeric"
+      }
+     ]
+    }
+   }
+  },
+  "/api/3/action/datastore_search_sql?sql=SELECT%20%22Site%22%2C%20count%28%2A%29%20AS%20readings%20FROM%20%222bbef99e-9974-49b9-a316-57402b00609c%22%20GROUP%20BY%201": {
+   "status": 200,
+   "body": {
+    "help": "https://www.data.qld.gov.au/api/3/action/help_show?name=datastore_search_sql",
+    "success": true,
+    "result": {
+     "sql": "SELECT \"Site\", count(*) AS readings FROM \"2bbef99e-9974-49b9-a316-57402b00609c\" GROUP BY 1",
+     "records": [
+      {
+       "Site": "North Moreton Bay",
+       "readings": 360
+      },
+      {
+       "Site": "Gold Coast Mk4",
+       "readings": 370
+      },
+      {
+       "Site": "Amrun 4892",
+       "readings": 370
+      },
+      {
+       "Site": "Hervey Bay",
+       "readings": 322
+      },
+      {
+       "Site": "Brisbane Mk4",
+       "readings": 311
+      },
+      {
+       "Site": "Mooloolaba",
+       "readings": 366
+      },
+      {
+       "Site": "Hay Point TriAxys",
+       "readings": 555
+      },
+      {
+       "Site": "Abbot Point TriAxys",
+       "readings": 556
+      },
+      {
+       "Site": "Skardon River Outer",
+       "readings": 367
+      },
+      {
+       "Site": "Wide Bay",
+       "readings": 366
+      },
+      {
+       "Site": "One Tree Island (Offshore Gladstone)",
+       "readings": 363
+      },
+      {
+       "Site": "Amrun Offshore",
+       "readings": 174
+      },
+      {
+       "Site": "Tweed Offshore",
+       "readings": 370
+      },
+      {
+       "Site": "Albatross Bay",
+       "readings": 360
+      },
+      {
+       "Site": "Townsville",
+       "readings": 369
+      },
+      {
+       "Site": "Gladstone",
+       "readings": 368
+      },
+      {
+       "Site": "Mackay Mk4",
+       "readings": 344
+      },
+      {
+       "Site": "Emu Park",
+       "readings": 368
+      },
+      {
+       "Site": "Bilinga",
+       "readings": 370
+      },
+      {
+       "Site": "Palm Beach Mk4",
+       "readings": 370
+      },
+      {
+       "Site": "Tweed Heads Mk4",
+       "readings": 369
+      },
+      {
+       "Site": "Woorim",
+       "readings": 370
+      },
+      {
+       "Site": "Bundaberg",
+       "readings": 366
+      },
+      {
+       "Site": "Caloundra",
+       "readings": 364
+      },
+      {
+       "Site": "Skardon River Offshore",
+       "readings": 174
+      },
+      {
+       "Site": "Mackay Harbour (east of southern breakwater)",
+       "readings": 556
+      },
+      {
+       "Site": "Cairns Mk4",
+       "readings": 370
+      }
+     ],
+     "fields": [
+      {
+       "id": "Site",
+       "type": "text"
+      },
+      {
+       "id": "readings",
+       "type": "int8"
+      }
+     ]
+    }
+   }
+  },
+  "/api/3/action/datastore_search_sql?sql=SELECT%20%2A%20FROM%20%28SELECT%20%22Site%22%2C%20%22DateTime%22%3A%3Atimestamp%20AS%20ts%2C%20%22Hs%22%3A%3Anumeric%20AS%20hs%20FROM%20%222bbef99e-9974-49b9-a316-57402b00609c%22%20WHERE%20%22Site%22%20%3D%20%27Caloundra%27%20ORDER%20BY%20ts%20LIMIT%203%29%20AS%20_vgi_ckan%20LIMIT%200": {
+   "status": 200,
+   "body": {
+    "help": "https://www.data.qld.gov.au/api/3/action/help_show?name=datastore_search_sql",
+    "success": true,
+    "result": {
+     "sql": "SELECT * FROM (SELECT \"Site\", \"DateTime\"::timestamp AS ts, \"Hs\"::numeric AS hs FROM \"2bbef99e-9974-49b9-a316-57402b00609c\" WHERE \"Site\" = 'Caloundra' ORDER BY ts LIMIT 3) AS _vgi_ckan LIMIT 0",
+     "records": [],
+     "fields": [
+      {
+       "id": "Site",
+       "type": "text"
+      },
+      {
+       "id": "ts",
+       "type": "timestamp"
+      },
+      {
+       "id": "hs",
+       "type": "numeric"
+      }
+     ]
+    }
+   }
+  },
+  "/api/3/action/datastore_search_sql?sql=SELECT%20%2A%20FROM%20%28SELECT%20%22Site%22%2C%20count%28%2A%29%20AS%20readings%20FROM%20%222bbef99e-9974-49b9-a316-57402b00609c%22%20GROUP%20BY%201%29%20AS%20_vgi_ckan%20LIMIT%200": {
+   "status": 200,
+   "body": {
+    "help": "https://www.data.qld.gov.au/api/3/action/help_show?name=datastore_search_sql",
+    "success": true,
+    "result": {
+     "sql": "SELECT * FROM (SELECT \"Site\", count(*) AS readings FROM \"2bbef99e-9974-49b9-a316-57402b00609c\" GROUP BY 1) AS _vgi_ckan LIMIT 0",
+     "records": [],
+     "fields": [
+      {
+       "id": "Site",
+       "type": "text"
+      },
+      {
+       "id": "readings",
+       "type": "int8"
+      }
+     ]
+    }
+   }
+  },
+  "/api/3/action/datastore_search_sql?sql=SELECT%20%2A%20FROM%20%28SELECT%20%22Site%22%2C%20count%28%2A%29%20AS%20readings%2C%20max%28%22DateTime%22%3A%3Atimestamp%29%20AS%20latest%20FROM%20%222bbef99e-9974-49b9-a316-57402b00609c%22%20GROUP%20BY%201%29%20AS%20_vgi_ckan%20LIMIT%200": {
+   "status": 200,
+   "body": {
+    "help": "https://www.data.qld.gov.au/api/3/action/help_show?name=datastore_search_sql",
+    "success": true,
+    "result": {
+     "sql": "SELECT * FROM (SELECT \"Site\", count(*) AS readings, max(\"DateTime\"::timestamp) AS latest FROM \"2bbef99e-9974-49b9-a316-57402b00609c\" GROUP BY 1) AS _vgi_ckan LIMIT 0",
+     "records": [],
+     "fields": [
+      {
+       "id": "Site",
+       "type": "text"
+      },
+      {
+       "id": "readings",
+       "type": "int8"
+      },
+      {
+       "id": "latest",
+       "type": "timestamp"
+      }
+     ]
+    }
+   }
+  },
+  "/api/3/action/status_show": {
+   "status": 200,
+   "body": {
+    "help": "https://www.data.qld.gov.au/api/3/action/help_show?name=status_show",
+    "success": true,
+    "result": {
+     "site_title": "Open Data Portal | Queensland Government",
+     "site_description": "",
+     "site_url": "https://www.data.qld.gov.au",
+     "error_emails_to": null,
+     "locale_default": "en_AU",
+     "extensions": [
+      "stats",
+      "resource_proxy",
+      "image_view",
+      "audio_view",
+      "video_view",
+      "datatables_view",
+      "datastore",
+      "data_qld",
+      "data_qld_google_analytics",
+      "dcat",
+      "structured_data",
+      "validation",
+      "resource_type_validation",
+      "validation_schema_generator",
+      "qgovext",
+      "auth",
+      "report",
+      "datarequests",
+      "ytp_comments",
+      "csrf_filter",
+      "scheming_datasets",
+      "qa",
+      "archiver",
+      "harvest",
+      "ckan_harvester",
+      "resource_visibility",
+      "ssm_config",
+      "xloader",
+      "s3filestore",
+      "oidc_pkce",
+      "activity"
+     ]
+    }
+   }
+  }
+ },
+ "recorded_at": "2026-11-15"
+}

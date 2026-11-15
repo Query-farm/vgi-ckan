@@ -1,0 +1,135 @@
+# name: test/sql/datastore.test
+# description: DataStore functions through DuckDB against recorded CKAN 2.9 / 2.10 portals and a portal with datastore_search_sql
+# group: [ckan]
+
+require vgi
+
+require-env CKAN_WORKER
+
+require-env CKAN_MOCK
+
+statement ok
+ATTACH 'ckan' (TYPE vgi, LOCATION '{CKAN_WORKER}');
+
+# ------------------------------------------------------------------ datastore
+
+# Types come from the DataStore field types (CKAN 2.9: int, numeric, text).
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5'));
+----
+_id	BIGINT
+po_no_	DOUBLE
+Supplier Name	VARCHAR
+Amount	DOUBLE
+Description	VARCHAR
+paid_yes_no	VARCHAR
+
+# Several pages (page_size 50 over 125 rows); the equality filter and the projection go to the portal.
+query IR
+SELECT count(*), round(sum("Amount"), 2) FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5', page_size := 50)
+WHERE paid_yes_no = 'Y';
+----
+116	13537083.33
+
+query IIR
+SELECT count(*), count(DISTINCT _id), round(sum("Amount"), 2) FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5', page_size := 50);
+----
+125	125	14094737.41
+
+# IN lists become a list-valued filter; non-equality predicates are applied locally.
+query TI
+SELECT paid_yes_no, count(*) FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5')
+WHERE paid_yes_no IN ('Y', 'N') AND "Amount" > 100000 GROUP BY ALL ORDER BY 1;
+----
+N	2
+Y	26
+
+# Top-N on a numeric column: sort="Amount" desc nulls last with an early stop.
+query RR
+SELECT po_no_, "Amount" FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5') ORDER BY "Amount" DESC LIMIT 3;
+----
+128979.0	2035925.74
+128532.0	2018559.4
+128368.0	1238823.31
+
+# filters := (remote JSON filter) and q := full text.
+query I
+SELECT count(*) FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5', filters := '{"paid_yes_no": "N"}');
+----
+9
+
+query I
+SELECT count(*) > 0 FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5', q := 'Unitary');
+----
+true
+
+statement error
+SELECT * FROM ckan.main.datastore('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5', filters := '[1, 2]');
+----
+<REGEX>:.*filters must be a JSON object.*
+
+# CKAN 2.10 (all-text columns): the DataStore loaded the CSV as text, so cast in SQL.
+query TTI
+SELECT year, reporting_period, count(*) FROM ckan.main.datastore('{CKAN_MOCK}/canada', 'dba8cc4a-2a57-435c-a270-fa024474e609')
+WHERE owner_org = 'cwa-aec' GROUP BY ALL ORDER BY ALL;
+----
+2024	P02	1
+2025	P01	1
+
+# A resource that is not in DataStore: a clear error pointing at read_csv.
+statement error
+SELECT * FROM ckan.main.datastore('{CKAN_MOCK}/demo', '73127990-4645-4de7-a5f0-f016d028d984');
+----
+<REGEX>:.*not in .* DataStore.*read_csv.*
+
+# -------------------------------------------------------------- datastore_sql
+
+# Server-side SQL with typed results (timestamp, numeric, int8).
+query TTR
+SELECT * FROM ckan.main.datastore_sql('{CKAN_MOCK}/qld',
+  'SELECT "Site", "DateTime"::timestamp AS ts, "Hs"::numeric AS hs FROM "2bbef99e-9974-49b9-a316-57402b00609c" WHERE "Site" = ''Caloundra'' ORDER BY ts LIMIT 3');
+----
+Caloundra	2026-11-08 00:00:00	0.821
+Caloundra	2026-11-08 00:30:00	0.869
+Caloundra	2026-11-08 01:00:00	0.818
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ckan.main.datastore_sql('{CKAN_MOCK}/qld',
+  'SELECT "Site", count(*) AS readings, max("DateTime"::timestamp) AS latest FROM "2bbef99e-9974-49b9-a316-57402b00609c" GROUP BY 1'));
+----
+Site	VARCHAR
+readings	BIGINT
+latest	TIMESTAMP
+
+query TI
+SELECT "Site", readings FROM ckan.main.datastore_sql('{CKAN_MOCK}/qld',
+  'SELECT "Site", count(*) AS readings FROM "2bbef99e-9974-49b9-a316-57402b00609c" GROUP BY 1') ORDER BY readings DESC, 1 LIMIT 3;
+----
+Abbot Point TriAxys	556
+Mackay Harbour (east of southern breakwater)	556
+Hay Point TriAxys	555
+
+# Portals that do not enable it say so.
+statement error
+SELECT * FROM ckan.main.datastore_sql('{CKAN_MOCK}/ireland', 'SELECT 1 AS one');
+----
+<REGEX>:.*does not enable datastore_search_sql.*
+
+statement error
+SELECT * FROM ckan.main.datastore_sql('{CKAN_MOCK}/qld', 'DELETE FROM x');
+----
+<REGEX>:.*pattern.*
+
+# -------------------------------------------------------------- resource_data
+
+# In DataStore: typed rows, same as datastore().
+query IR
+SELECT count(*), round(sum("Amount"), 2) FROM ckan.main.resource_data('{CKAN_MOCK}/ireland', 'dfb0930a-98a5-45a0-a6b7-e4beb66340e5');
+----
+125	14094737.41
+
+# Not in DataStore: the download URL and the DuckDB call that reads it.
+query TTTT
+SELECT format, url, read_sql, datastore_active FROM ckan.main.resource_data('{CKAN_MOCK}/demo', '73127990-4645-4de7-a5f0-f016d028d984');
+----
+CSV	https://example.com/data/temperature.csv	SELECT * FROM read_csv('https://example.com/data/temperature.csv')	false
