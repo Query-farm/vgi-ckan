@@ -71,7 +71,7 @@ class Portal:
 
     def __init__(self, file: Path) -> None:
         self.file = file
-        self.data: dict[str, Any] = json.loads(file.read_text())
+        self.data: dict[str, Any] = json.loads(file.read_text(encoding="utf-8"))
         self.prefix: str = self.data["prefix"]
         self.upstream: str | None = self.data.get("upstream")
         self.token: str | None = self.data.get("token")
@@ -79,7 +79,9 @@ class Portal:
 
     def save(self) -> None:
         self.data["interactions"] = dict(sorted(self.interactions.items()))
-        self.file.write_text(json.dumps(self.data, indent=1, ensure_ascii=False, sort_keys=False) + "\n")
+        self.file.write_text(
+            json.dumps(self.data, indent=1, ensure_ascii=False, sort_keys=False) + "\n", encoding="utf-8"
+        )
 
 
 class State:
