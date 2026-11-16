@@ -38,7 +38,7 @@ INSTALL vgi FROM query_farm;
 LOAD vgi FROM query_farm;
 
 ATTACH 'ckan' (TYPE vgi,
-  LOCATION 'uvx --from git+https://github.com/Query-farm/vgi-ckan@v0.1.1 vgi-ckan-worker');
+  LOCATION 'uvx --from git+https://github.com/Query-farm/vgi-ckan@v0.1.2 vgi-ckan-worker');
 
 SELECT site_title, ckan_version FROM ckan.main.portal_info('https://demo.ckan.org');
 ```
