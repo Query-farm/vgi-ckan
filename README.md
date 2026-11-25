@@ -27,6 +27,8 @@ The free-text search and the `modified` range are sent to the portal's Solr inde
 selects only indexed columns, so the worker requests just those fields (`fl`) instead of full
 dataset records.
 
+vgi-ckan 0.2.0 speaks VGI protocol 3.4, so it needs Haybarn 2.0.1 or newer (Haybarn 2.0.0 loads a 3.3 `vgi` extension that cannot attach it).
+
 ## Quick start
 
 **DuckDB 2.0:**
@@ -38,7 +40,7 @@ INSTALL vgi FROM query_farm;
 LOAD vgi FROM query_farm;
 
 ATTACH 'ckan' (TYPE vgi,
-  LOCATION 'uvx --from git+https://github.com/Query-farm/vgi-ckan@v0.1.3 vgi-ckan-worker');
+  LOCATION 'uvx --from git+https://github.com/Query-farm/vgi-ckan@v0.2.0 vgi-ckan-worker');
 
 SELECT site_title, ckan_version FROM ckan.main.portal_info('https://demo.ckan.org');
 ```
